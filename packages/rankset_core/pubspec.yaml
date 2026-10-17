@@ -1,0 +1,22 @@
+name: rankset_core
+description: Shared theme, models, scoring and Firestore repositories for the RankSet apps.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+# Versions are left as "any" on purpose: run `flutter pub upgrade` once, then pin the
+# versions it chose (copy them from pubspec.lock) so builds stay reproducible.
+dependencies:
+  flutter:
+    sdk: flutter
+  cloud_firestore: any
+  cloud_functions: any
+  google_fonts: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: any

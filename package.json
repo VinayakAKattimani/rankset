@@ -1,0 +1,28 @@
+{
+  "name": "rankset-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "RankSet backend foundation: Firestore rules, admin tooling, tests",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build:rules": "node scripts/build-rules.js",
+    "test:unit": "node --test tests/unit/*.test.js",
+    "test:rules:a": "firebase emulators:exec --only firestore --project demo-rankset \"node --test tests/rules/modeA.test.js\"",
+    "test:rules:b": "firebase emulators:exec --only firestore --project demo-rankset \"node --test tests/rules/modeB.test.js\"",
+    "test:rules": "npm run test:rules:a && npm run test:rules:b",
+    "emulators": "firebase emulators:start --project demo-rankset",
+    "seed:emulator": "node scripts/seed-demo.js",
+    "admin": "node scripts/set-admin.js",
+    "backup:export": "node scripts/export-backup.js",
+    "backup:import": "node scripts/import-backup.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^13.0.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.0",
+    "firebase": "^11.0.0",
+    "firebase-tools": "^14.0.0"
+  }
+}

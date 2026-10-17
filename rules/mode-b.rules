@@ -1,0 +1,60 @@
+    // MODE B (fallback, works on the free Spark plan, no Cloud Functions).
+    // Flow: 1) client writes a PENDING attempt + completion marker in one batch (answers only, no score),
+    //       2) rules unlock the answer keys, 3) the phone computes the score,
+    //       4) client finalises the attempt ONCE (pending -> client). The score is bounded by the rules
+    //          but still client-computed. This does NOT meet "backend calculates the score".
+    //          See docs/ARCHITECTURE.md section 6.
+    function validNewAttempt(d) {
+      let q = get(/databases/$(database)/documents/quizzes/$(d.quizId)).data;
+      return d.keys().hasOnly(['uid', 'quizId', 'quizTitle', 'examId', 'subjectId', 'topicId', 'language', 'startedAt', 'submittedAt', 'responses', 'score', 'total', 'correct', 'wrong', 'unanswered', 'scoreSource'])
+        && d.keys().hasAll(['uid', 'quizId', 'quizTitle', 'examId', 'subjectId', 'topicId', 'language', 'startedAt', 'submittedAt', 'responses', 'score', 'total', 'correct', 'wrong', 'unanswered', 'scoreSource'])
+        && d.uid == request.auth.uid
+        && d.quizId is string
+        && q.status == 'published'
+        && d.quizTitle == q.title
+        && d.examId == q.examId && d.subjectId == q.subjectId && d.topicId == q.topicId
+        && d.language is string && langOk(d.language)
+        && d.startedAt is timestamp
+        && d.submittedAt == request.time
+        && d.responses is map
+        && d.responses.size() <= q.questionCount
+        && d.responses.keys().hasOnly(q.questionIds)
+        && d.total is int && d.total == q.questionCount
+        && d.score == 0 && d.correct == 0 && d.wrong == 0 && d.unanswered == d.total
+        && d.scoreSource == 'pending';
+    }
+
+    // One-time finalisation: only the score fields change, counts must add up, and the
+    // number of correct+wrong answers can never exceed the number of questions answered.
+    function validFinalize(before, after) {
+      return before.uid == request.auth.uid
+        && before.scoreSource == 'pending'
+        && after.scoreSource == 'client'
+        && after.diff(before).affectedKeys().hasOnly(['score', 'correct', 'wrong', 'unanswered', 'scoreSource'])
+        && after.correct is int && after.wrong is int && after.unanswered is int
+        && after.correct >= 0 && after.wrong >= 0 && after.unanswered >= 0
+        && after.correct + after.wrong == before.responses.size()
+        && after.unanswered == before.total - before.responses.size()
+        && after.score == after.correct;
+    }
+
+    match /attempts/{attemptId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create: if signedIn() && validNewAttempt(request.resource.data);
+      allow update: if signedIn() && validFinalize(resource.data, request.resource.data);
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // The marker must be written in the same batch as a real attempt for this quiz.
+    match /users/{uid}/completed/{quizId} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create, update: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['attemptId', 'completedAt'])
+        && request.resource.data.keys().hasAll(['attemptId', 'completedAt'])
+        && request.resource.data.attemptId is string
+        && request.resource.data.completedAt == request.time
+        && existsAfter(/databases/$(database)/documents/attempts/$(request.resource.data.attemptId))
+        && getAfter(/databases/$(database)/documents/attempts/$(request.resource.data.attemptId)).data.uid == uid
+        && getAfter(/databases/$(database)/documents/attempts/$(request.resource.data.attemptId)).data.quizId == quizId;
+      allow delete: if isOwner(uid);
+    }

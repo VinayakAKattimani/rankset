@@ -1,0 +1,30 @@
+name: rankset_student
+description: RankSet student app (Android).
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+# Versions are "any" so `flutter pub get` picks a compatible set today. Afterwards copy the resolved
+# versions from pubspec.lock into this file to keep builds reproducible.
+dependencies:
+  flutter:
+    sdk: flutter
+  rankset_core:
+    path: ../../packages/rankset_core
+  firebase_core: any
+  firebase_auth: any
+  cloud_firestore: any
+  cloud_functions: any
+  google_fonts: any
+  connectivity_plus: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: any
+
+flutter:
+  uses-material-design: true

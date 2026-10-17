@@ -1,0 +1,13 @@
+    // MODE A: server-side scoring (Cloud Function with Admin SDK).
+    // Clients can NOT create attempts or completion markers. Admin SDK bypasses rules.
+    match /attempts/{attemptId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create, update: if false;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    match /users/{uid}/completed/{quizId} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create, update: if false;
+      allow delete: if isOwner(uid);
+    }

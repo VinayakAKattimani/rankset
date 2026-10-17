@@ -1,0 +1,297 @@
+rules_version = '2';
+
+// RankSet Firestore security rules.
+// GENERATED FILE. Edit rules/template.rules and rules/mode-*.rules, then run: npm run build:rules
+// Scoring mode: A (server-side scoring via Cloud Function)
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Admin = custom claim set ONLY by scripts/set-admin.js (Admin SDK, run by the
+    // project owner). Clients cannot change claims. Email must be verified too.
+    function isAdmin() {
+      return signedIn()
+        && request.auth.token.admin == true
+        && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function langOk(l) {
+      return l in ['en', 'hi', 'bn', 'ta', 'te', 'mr', 'gu', 'kn', 'ml', 'pa'];
+    }
+
+    function optStr(v, k, maxLen) {
+      return !(k in v) || (v[k] is string && v[k].size() > 0 && v[k].size() <= maxLen);
+    }
+
+    // Localized string map. English is required, other languages optional.
+    function validLoc(v, maxLen) {
+      return v is map
+        && v.keys().hasOnly(['en', 'hi', 'bn', 'ta', 'te', 'mr', 'gu', 'kn', 'ml', 'pa'])
+        && 'en' in v
+        && v.en is string && v.en.size() > 0 && v.en.size() <= maxLen
+        && optStr(v, 'hi', maxLen) && optStr(v, 'bn', maxLen) && optStr(v, 'ta', maxLen)
+        && optStr(v, 'te', maxLen) && optStr(v, 'mr', maxLen) && optStr(v, 'gu', maxLen)
+        && optStr(v, 'kn', maxLen) && optStr(v, 'ml', maxLen) && optStr(v, 'pa', maxLen);
+    }
+
+    function validOptions(o) {
+      return o is list && o.size() == 4
+        && o[0] is string && o[0].size() > 0 && o[0].size() <= 300
+        && o[1] is string && o[1].size() > 0 && o[1].size() <= 300
+        && o[2] is string && o[2].size() > 0 && o[2].size() <= 300
+        && o[3] is string && o[3].size() > 0 && o[3].size() <= 300;
+    }
+
+    function validTr(t) {
+      return t is map
+        && t.keys().hasOnly(['text', 'options'])
+        && t.text is string && t.text.size() > 0 && t.text.size() <= 1000
+        && validOptions(t.options);
+    }
+
+    function optTr(t, k) {
+      return !(k in t) || validTr(t[k]);
+    }
+
+    function validTranslations(t) {
+      return t is map
+        && t.keys().hasOnly(['en', 'hi', 'bn', 'ta', 'te', 'mr', 'gu', 'kn', 'ml', 'pa'])
+        && 'en' in t && validTr(t.en)
+        && optTr(t, 'hi') && optTr(t, 'bn') && optTr(t, 'ta') && optTr(t, 'te')
+        && optTr(t, 'mr') && optTr(t, 'gu') && optTr(t, 'kn') && optTr(t, 'ml') && optTr(t, 'pa');
+    }
+
+    function quizStatus(quizId) {
+      return get(/databases/$(database)/documents/quizzes/$(quizId)).data.status;
+    }
+
+    function catalogBase(d) {
+      return d.order is int && d.order >= 0 && d.order <= 100000
+        && d.isPublished is bool
+        && validLoc(d.name, 120)
+        && d.updatedAt == request.time
+        && d.updatedBy == request.auth.uid;
+    }
+
+    // ------------------------------------------------------------------
+    // Catalog: categories -> exams -> subjects -> topics
+    // Students read only published items (queries must filter isPublished == true).
+    // ------------------------------------------------------------------
+    match /categories/{id} {
+      allow read: if signedIn() && (isAdmin() || resource.data.isPublished == true);
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['name', 'order', 'isPublished', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasAll(['name', 'order', 'isPublished', 'updatedAt', 'updatedBy'])
+        && catalogBase(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /exams/{id} {
+      allow read: if signedIn() && (isAdmin() || resource.data.isPublished == true);
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['categoryId', 'name', 'order', 'isPublished', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasAll(['categoryId', 'name', 'order', 'isPublished', 'updatedAt', 'updatedBy'])
+        && request.resource.data.categoryId is string
+        && exists(/databases/$(database)/documents/categories/$(request.resource.data.categoryId))
+        && catalogBase(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /subjects/{id} {
+      allow read: if signedIn() && (isAdmin() || resource.data.isPublished == true);
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['examId', 'name', 'order', 'isPublished', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasAll(['examId', 'name', 'order', 'isPublished', 'updatedAt', 'updatedBy'])
+        && request.resource.data.examId is string
+        && exists(/databases/$(database)/documents/exams/$(request.resource.data.examId))
+        && catalogBase(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /topics/{id} {
+      allow read: if signedIn() && (isAdmin() || resource.data.isPublished == true);
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['examId', 'subjectId', 'name', 'order', 'isPublished', 'updatedAt', 'updatedBy'])
+        && request.resource.data.keys().hasAll(['examId', 'subjectId', 'name', 'order', 'isPublished', 'updatedAt', 'updatedBy'])
+        && request.resource.data.examId is string
+        && request.resource.data.subjectId is string
+        && exists(/databases/$(database)/documents/subjects/$(request.resource.data.subjectId))
+        && catalogBase(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // ------------------------------------------------------------------
+    // Users (students). No role field exists here on purpose.
+    // ------------------------------------------------------------------
+    match /users/{uid} {
+      allow get: if isOwner(uid) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['displayName', 'email', 'preferredLanguage', 'createdAt'])
+        && request.resource.data.keys().hasAll(['displayName', 'preferredLanguage', 'createdAt'])
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() > 0 && request.resource.data.displayName.size() <= 60
+        && request.resource.data.preferredLanguage is string
+        && langOk(request.resource.data.preferredLanguage)
+        && request.resource.data.createdAt == request.time
+        && (!('email' in request.resource.data) || request.resource.data.email == request.auth.token.email);
+      allow update: if isOwner(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'preferredLanguage'])
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() > 0 && request.resource.data.displayName.size() <= 60
+        && request.resource.data.preferredLanguage is string
+        && langOk(request.resource.data.preferredLanguage);
+      allow delete: if isOwner(uid);
+    }
+
+    // ------------------------------------------------------------------
+    // Quizzes. Lifecycle: draft -> in_review -> published -> unpublished -> draft
+    // Only 'draft' content is editable. Review/approval is enforced here.
+    // ------------------------------------------------------------------
+    function reviewerAllowed(before) {
+      return request.auth.uid != before.lastEditedBy
+        || (exists(/databases/$(database)/documents/config/review)
+            && get(/databases/$(database)/documents/config/review).data.requireDifferentReviewer == false);
+    }
+
+    function quizShape(d) {
+      return d.keys().hasOnly(['examId', 'subjectId', 'topicId', 'title', 'languages', 'status', 'questionIds', 'questionCount', 'createdBy', 'lastEditedBy', 'reviewedBy', 'reviewedAt', 'publishedAt', 'updatedAt'])
+        && d.keys().hasAll(['examId', 'subjectId', 'topicId', 'title', 'languages', 'status', 'questionIds', 'questionCount', 'createdBy', 'lastEditedBy', 'reviewedBy', 'reviewedAt', 'publishedAt', 'updatedAt'])
+        && d.examId is string && d.subjectId is string && d.topicId is string
+        && validLoc(d.title, 200)
+        && d.languages is list && d.languages.size() >= 1 && d.languages.size() <= 10
+        && 'en' in d.languages
+        && d.languages.hasOnly(['en', 'hi', 'bn', 'ta', 'te', 'mr', 'gu', 'kn', 'ml', 'pa'])
+        && d.status in ['draft', 'in_review', 'published', 'unpublished']
+        && d.questionIds is list && d.questionIds.size() <= 200
+        && d.questionCount is int && d.questionCount == d.questionIds.size()
+        && d.createdBy is string && d.lastEditedBy is string
+        && (d.reviewedBy == null || d.reviewedBy is string)
+        && (d.reviewedAt == null || d.reviewedAt is timestamp)
+        && (d.publishedAt == null || d.publishedAt is timestamp)
+        && d.updatedAt == request.time;
+    }
+
+    function quizTransitionOk() {
+      let b = resource.data;
+      let a = request.resource.data;
+      let changed = a.diff(b).affectedKeys();
+      return a.createdBy == b.createdBy
+        && (
+          // Edit content while still a draft
+          (b.status == 'draft' && a.status == 'draft'
+            && a.lastEditedBy == request.auth.uid
+            && a.reviewedBy == null && a.reviewedAt == null && a.publishedAt == null)
+          // Submit for review (content is frozen: only status fields change)
+          || (b.status == 'draft' && a.status == 'in_review'
+            && changed.hasOnly(['status', 'updatedAt', 'lastEditedBy'])
+            && a.lastEditedBy == request.auth.uid
+            && a.questionCount >= 1)
+          // Reviewer sends it back
+          || (b.status == 'in_review' && a.status == 'draft'
+            && changed.hasOnly(['status', 'updatedAt', 'lastEditedBy'])
+            && a.lastEditedBy == request.auth.uid)
+          // Reviewer approves and publishes
+          || (b.status == 'in_review' && a.status == 'published'
+            && changed.hasOnly(['status', 'updatedAt', 'reviewedBy', 'reviewedAt', 'publishedAt'])
+            && a.reviewedBy == request.auth.uid
+            && a.reviewedAt == request.time
+            && a.publishedAt == request.time
+            && reviewerAllowed(b))
+          // Unpublish
+          || (b.status == 'published' && a.status == 'unpublished'
+            && changed.hasOnly(['status', 'updatedAt']))
+          // Reopen as draft (must go through review again)
+          || (b.status == 'unpublished' && a.status == 'draft'
+            && changed.hasOnly(['status', 'updatedAt', 'lastEditedBy', 'reviewedBy', 'reviewedAt', 'publishedAt'])
+            && a.lastEditedBy == request.auth.uid
+            && a.reviewedBy == null && a.reviewedAt == null && a.publishedAt == null)
+        );
+    }
+
+    match /quizzes/{quizId} {
+      allow read: if signedIn() && (isAdmin() || resource.data.status == 'published');
+      allow create: if isAdmin()
+        && quizShape(request.resource.data)
+        && request.resource.data.status == 'draft'
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.lastEditedBy == request.auth.uid
+        && request.resource.data.reviewedBy == null
+        && request.resource.data.reviewedAt == null
+        && request.resource.data.publishedAt == null
+        && exists(/databases/$(database)/documents/topics/$(request.resource.data.topicId));
+      allow update: if isAdmin()
+        && quizShape(request.resource.data)
+        && quizTransitionOk();
+      allow delete: if isAdmin() && resource.data.status != 'published';
+
+      // Questions: language-neutral id, translations inside. No answers here.
+      match /questions/{questionId} {
+        allow read: if signedIn() && (isAdmin() || quizStatus(quizId) == 'published');
+        allow create, update: if isAdmin()
+          && quizStatus(quizId) == 'draft'
+          && request.resource.data.keys().hasOnly(['order', 'translations', 'updatedAt', 'updatedBy'])
+          && request.resource.data.keys().hasAll(['order', 'translations', 'updatedAt', 'updatedBy'])
+          && request.resource.data.order is int
+          && request.resource.data.order >= 0 && request.resource.data.order < 200
+          && validTranslations(request.resource.data.translations)
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.updatedBy == request.auth.uid;
+        allow delete: if isAdmin() && quizStatus(quizId) == 'draft';
+      }
+
+      // Answer keys: same questionId. Hidden from students until they have
+      // completed this quiz (users/{uid}/completed/{quizId} exists).
+      match /answerKeys/{questionId} {
+        allow read: if isAdmin()
+          || (signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)/completed/$(quizId)));
+        allow create, update: if isAdmin()
+          && quizStatus(quizId) == 'draft'
+          && request.resource.data.keys().hasOnly(['correctIndex', 'explanations', 'updatedAt', 'updatedBy'])
+          && request.resource.data.keys().hasAll(['correctIndex', 'explanations', 'updatedAt', 'updatedBy'])
+          && request.resource.data.correctIndex is int
+          && request.resource.data.correctIndex >= 0 && request.resource.data.correctIndex <= 3
+          && validLoc(request.resource.data.explanations, 2000)
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.updatedBy == request.auth.uid;
+        allow delete: if isAdmin() && quizStatus(quizId) == 'draft';
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // Config (e.g. config/review). Written only via Console or scripts.
+    // ------------------------------------------------------------------
+    match /config/{docId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // ------------------------------------------------------------------
+    // Attempts and completion markers (depends on scoring mode)
+    // ------------------------------------------------------------------
+    // MODE A: server-side scoring (Cloud Function with Admin SDK).
+    // Clients can NOT create attempts or completion markers. Admin SDK bypasses rules.
+    match /attempts/{attemptId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create, update: if false;
+      allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    match /users/{uid}/completed/{quizId} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create, update: if false;
+      allow delete: if isOwner(uid);
+    }
+  }
+}
